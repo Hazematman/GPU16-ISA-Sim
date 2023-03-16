@@ -1,5 +1,8 @@
 use std::*;
 use std::iter::*;
+use std::fs::File;
+use std::io::BufRead;
+use std::io::BufReader;
 
 #[derive(Debug)]
 pub enum Token {
@@ -180,20 +183,82 @@ fn parse_instructions(tokens: &[Token]) -> Result<Vec<Instruction>, String> {
 fn parse(input: &String) -> Result<Vec<Instruction>, String> {
     let tokens = lex(input).unwrap();
 
+    /*
     for t in &tokens {
         println!("Token is {:?}", t);
     }
+    */
 
     let instructions = parse_instructions(tokens.as_slice()).unwrap();
 
     Ok(instructions)
 }
 
-fn main() {
-    let test_string = "add r1, r2, r3;this is a comment\n";
-    let instructions = parse(&String::from(test_string)).unwrap();
+#[derive(Debug)]
+struct CpuState {
+    registers: [u16; 8],
+    program_counter: u32,
+}
 
-    for instruction in instructions {
+fn simulate(instructions: &[Instruction], registers: &[u16; 8]) {
+    let mut state = CpuState { registers: registers.clone(), program_counter: 0 };
+    let mut running = true;
+    while running {
+        match instructions[state.program_counter as usize] {
+            Instruction::Add(r1, r2, r3) => state.registers[r1 as usize] = state.registers[r2 as usize] + state.registers[r3 as usize],
+        }
+
+        state.program_counter += 1;
+        if state.program_counter as usize >= instructions.len() {
+            running = false;
+        }
+    }
+
+    println!("CPU state is ${:?}", state);
+}
+
+fn main() {
+    let args: Vec<String> = env::args().collect();
+    if args.len() < 3 {
+        println!("gpu16_sim <assembly file> <register file>");
+        return;
+    }
+
+    let asm_file = &args[1];
+    let reg_file = &args[2];
+
+
+
+
+    let asm_string = match fs::read_to_string(asm_file) {
+        Ok(text) => text,
+        Err(_) => {
+            println!("Failed to open assembly file {}", asm_file);
+            return;
+        }
+    };
+
+    /* Load register values into array */
+    let reg_f = File::open(reg_file).expect("File not found");
+    let reader = BufReader::new(reg_f);
+    /* TODO probably want to add cleaner error handling here */
+    let registers: [u16; 8] = reader
+        .lines()
+        .map(|line| line.unwrap().parse::<u16>().unwrap())
+        .collect::<Vec<u16>>()
+        .try_into()
+        .unwrap();
+
+    if registers.len() != 8 {
+        println!("Regsiter file should have 8 registers!");
+        return;
+    }
+
+    let instructions = parse(&asm_string).unwrap();
+
+    for instruction in &instructions {
         println!("Instruction is {:?}", instruction)
     }
+
+    simulate(instructions.as_slice(), &registers)
 }
