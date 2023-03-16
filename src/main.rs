@@ -7,7 +7,7 @@ use std::io::BufReader;
 #[derive(Debug)]
 pub enum Token {
     Text(String),
-    Num(u16),
+    Number(u16),
     NewLine,
     Comma,
     Comment(String),
@@ -60,7 +60,7 @@ fn lex(input: &String) -> Result<Vec<Token>, String> {
             '0'..='9' => {
                 it.next();
                 let n = get_number(c, &mut it);
-                result.push(Token::Num(n));
+                result.push(Token::Number(n));
             }
             '\n' => {
                 it.next();
@@ -93,6 +93,7 @@ fn lex(input: &String) -> Result<Vec<Token>, String> {
 #[derive(Debug)]
 pub enum Instruction {
     Add(u8, u8, u8),
+    LoadI(u16),
 }
 
 fn parse_reg<'a>(it: &mut impl Iterator<Item=&'a Token>) -> Result<u8, String> {
@@ -151,6 +152,24 @@ fn parse_add<'a>(it: &mut impl Iterator<Item=&'a Token>) -> Instruction {
     Instruction::Add(r1, r2, r3)
 }
 
+
+fn parse_immediate<'a>(it: &mut impl Iterator<Item=&'a Token>) -> Result<u16, String> {
+    let c = it.next().unwrap();
+    match c {
+        Token::Number(x) => Ok(*x),
+        _ => Err(format!("Expected register got {:?}", c))
+    }
+}
+
+fn parse_load_immediate<'a>(it: &mut impl Iterator<Item=&'a Token>) -> Instruction {
+    let imm = match parse_immediate(it) {
+        Ok(imm) => imm,
+        Err(message) => panic!("Error parsing loadi instruction, expected immediate, got: {:?}", message)
+    };
+
+    Instruction::LoadI(imm)
+}
+
 fn parse_instructions(tokens: &[Token]) -> Result<Vec<Instruction>, String> {
     let mut instructions = Vec::new();
     let mut it = tokens.iter();
@@ -163,6 +182,7 @@ fn parse_instructions(tokens: &[Token]) -> Result<Vec<Instruction>, String> {
                         let add_instr = parse_add(&mut it);
                         instructions.push(add_instr);
                     }
+                    "loadi" => instructions.push(parse_load_immediate(&mut it)),
                     _ => {
                         return Err(format!("Unknown instruction {:?}", text))
                     }
@@ -197,15 +217,17 @@ fn parse(input: &String) -> Result<Vec<Instruction>, String> {
 #[derive(Debug)]
 struct CpuState {
     registers: [u16; 8],
+    accumlator: u32,
     program_counter: u32,
 }
 
 fn simulate(instructions: &[Instruction], registers: &[u16; 8]) {
-    let mut state = CpuState { registers: registers.clone(), program_counter: 0 };
+    let mut state = CpuState { registers: registers.clone(), accumlator: 0, program_counter: 0 };
     let mut running = true;
     while running {
         match instructions[state.program_counter as usize] {
             Instruction::Add(r1, r2, r3) => state.registers[r1 as usize] = state.registers[r2 as usize] + state.registers[r3 as usize],
+            Instruction::LoadI(imm) => state.accumlator = imm as u32,
         }
 
         state.program_counter += 1;
@@ -226,9 +248,6 @@ fn main() {
 
     let asm_file = &args[1];
     let reg_file = &args[2];
-
-
-
 
     let asm_string = match fs::read_to_string(asm_file) {
         Ok(text) => text,
