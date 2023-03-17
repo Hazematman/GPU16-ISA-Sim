@@ -97,8 +97,18 @@ fn lex(input: &String) -> Result<Vec<Token>, String> {
 
 #[derive(Debug)]
 pub enum Instruction {
+    /* Three reg ops */
     Add(u8, u8, u8),
     Sub(u8, u8, u8),
+    And(u8, u8, u8),
+    Xor(u8, u8, u8),
+    ShiftLeft(u8, u8, u8),
+    ShiftRight(u8, u8, u8),
+
+    /* Two reg ops */
+    Not(u8, u8),
+
+    /* Special ops */
     LoadI(u16),
     MoveAcum(bool, u8),
 }
@@ -123,7 +133,7 @@ fn parse_reg<'a>(it: &mut impl Iterator<Item=&'a Token>) -> Result<u8, String> {
     }
 }
 
-fn parse_three_reg<'a>(it: &mut impl Iterator<Item=&'a Token>, instr: &str) -> (u8, u8, u8) {
+fn parse_two_reg<'a>(it: &mut impl Iterator<Item=&'a Token>, instr: &str) -> (u8, u8) {
     let r1 = match parse_reg(it) {
         Ok(reg) => reg,
         Err(message) => panic!("Error parsing {} instruction, expected register, got: {:?}", instr, message)
@@ -138,6 +148,12 @@ fn parse_three_reg<'a>(it: &mut impl Iterator<Item=&'a Token>, instr: &str) -> (
         Ok(reg) => reg,
         Err(message) => panic!("Error parsing {} instruction, expected register, got: {:?}", instr, message)
     };
+
+    (r1, r2)
+}
+
+fn parse_three_reg<'a>(it: &mut impl Iterator<Item=&'a Token>, instr: &str) -> (u8, u8, u8) {
+    let (r1, r2) = parse_two_reg(it, instr);
 
     match it.next().unwrap() {
         Token::Comma => (),
@@ -158,7 +174,6 @@ fn parse_three_reg<'a>(it: &mut impl Iterator<Item=&'a Token>, instr: &str) -> (
 
     (r1, r2, r3)
 }
-
 
 fn parse_immediate<'a>(it: &mut impl Iterator<Item=&'a Token>) -> Result<u16, String> {
     let c = it.next().unwrap();
@@ -218,6 +233,26 @@ fn parse_instructions(tokens: &[Token]) -> Result<Vec<Instruction>, String> {
                         let (r1, r2, r3) = parse_three_reg(&mut it, "sub");
                         instructions.push(Instruction::Sub(r1, r2, r3));
                     }
+                    "and" => {
+                        let (r1, r2, r3) = parse_three_reg(&mut it, "and");
+                        instructions.push(Instruction::And(r1, r2, r3));
+                    }
+                    "xor" => {
+                        let (r1, r2, r3) = parse_three_reg(&mut it, "xor");
+                        instructions.push(Instruction::Xor(r1, r2, r3));
+                    }
+                    "shift_left" => {
+                        let (r1, r2, r3) = parse_three_reg(&mut it, "shift_left");
+                        instructions.push(Instruction::ShiftLeft(r1, r2, r3));
+                    }
+                    "shift_right" => {
+                        let (r1, r2, r3) = parse_three_reg(&mut it, "shift_right");
+                        instructions.push(Instruction::ShiftRight(r1, r2, r3));
+                    }
+                    "not" => {
+                        let(r1, r2) = parse_two_reg(&mut it, "not");
+                        instructions.push(Instruction::Not(r1, r2));
+                    }
                     "loadi" => instructions.push(parse_load_immediate(&mut it)),
                     "move_acum" => instructions.push(parse_move_acum(&mut it)),
                     _ => {
@@ -265,6 +300,11 @@ fn simulate(instructions: &[Instruction], registers: &[u16; 8]) {
         match instructions[state.program_counter as usize] {
             Instruction::Add(r1, r2, r3) => state.registers[r1 as usize] = state.registers[r2 as usize] + state.registers[r3 as usize],
             Instruction::Sub(r1, r2, r3) => state.registers[r1 as usize] = state.registers[r2 as usize] - state.registers[r3 as usize],
+            Instruction::And(r1, r2, r3) => state.registers[r1 as usize] = state.registers[r2 as usize] & state.registers[r3 as usize],
+            Instruction::Xor(r1, r2, r3) => state.registers[r1 as usize] = state.registers[r2 as usize] ^ state.registers[r3 as usize],
+            Instruction::ShiftLeft(r1, r2, r3) => state.registers[r1 as usize] = state.registers[r2 as usize] << state.registers[r3 as usize],
+            Instruction::ShiftRight(r1, r2, r3) => state.registers[r1 as usize] = state.registers[r2 as usize] >> state.registers[r3 as usize],
+            Instruction::Not(r1, r2) => state.registers[r1 as usize] = !state.registers[r2 as usize],
             Instruction::LoadI(imm) => state.accumlator = imm as u32,
             Instruction::MoveAcum(move_type, reg) => {
                 let mut value = state.accumlator;
