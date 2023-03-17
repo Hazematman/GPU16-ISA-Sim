@@ -98,6 +98,7 @@ fn lex(input: &String) -> Result<Vec<Token>, String> {
 #[derive(Debug)]
 pub enum Instruction {
     Add(u8, u8, u8),
+    Sub(u8, u8, u8),
     LoadI(u16),
     MoveAcum(bool, u8),
 }
@@ -122,40 +123,40 @@ fn parse_reg<'a>(it: &mut impl Iterator<Item=&'a Token>) -> Result<u8, String> {
     }
 }
 
-fn parse_add<'a>(it: &mut impl Iterator<Item=&'a Token>) -> Instruction {
+fn parse_three_reg<'a>(it: &mut impl Iterator<Item=&'a Token>, instr: &str) -> (u8, u8, u8) {
     let r1 = match parse_reg(it) {
         Ok(reg) => reg,
-        Err(message) => panic!("Error parsing add instruction, expected register, got: {:?}", message)
+        Err(message) => panic!("Error parsing {} instruction, expected register, got: {:?}", instr, message)
     };
 
     match it.next().unwrap() {
         Token::Comma => (),
-        unknown => panic!("Error parsing add instruction, expected comma, got: {:?}", unknown)
+        unknown => panic!("Error parsing {} instruction, expected comma, got: {:?}", instr, unknown)
     };
 
     let r2 = match parse_reg(it) {
         Ok(reg) => reg,
-        Err(message) => panic!("Error parsing add instruction, expected register, got: {:?}", message)
+        Err(message) => panic!("Error parsing {} instruction, expected register, got: {:?}", instr, message)
     };
 
     match it.next().unwrap() {
         Token::Comma => (),
-        unknown => panic!("Error parsing add instruction, expected comma, got: {:?}", unknown)
+        unknown => panic!("Error parsing {} instruction, expected comma, got: {:?}", instr, unknown)
     };
 
     let r3 = match parse_reg(it) {
         Ok(reg) => reg,
-        Err(message) => panic!("Error parsing add instruction, expected register, got: {:?}", message)
+        Err(message) => panic!("Error parsing {} instruction, expected register, got: {:?}", instr, message)
     };
 
     /* Expect comment or newline at the end */
     match it.next().unwrap() {
         Token::Comment(_) => (),
         Token::NewLine => (),
-        unknown => panic!("Error parsing add instruction, expected end of line, got: {:?}", unknown)
+        unknown => panic!("Error parsing {} instruction, expected end of line, got: {:?}", instr, unknown)
     }
 
-    Instruction::Add(r1, r2, r3)
+    (r1, r2, r3)
 }
 
 
@@ -210,8 +211,12 @@ fn parse_instructions(tokens: &[Token]) -> Result<Vec<Instruction>, String> {
             Token::Text(text) => {
                 match text.as_str() {
                     "add" => {
-                        let add_instr = parse_add(&mut it);
-                        instructions.push(add_instr);
+                        let (r1, r2, r3) = parse_three_reg(&mut it, "add");
+                        instructions.push(Instruction::Add(r1, r2, r3));
+                    }
+                    "sub" => {
+                        let (r1, r2, r3) = parse_three_reg(&mut it, "sub");
+                        instructions.push(Instruction::Sub(r1, r2, r3));
                     }
                     "loadi" => instructions.push(parse_load_immediate(&mut it)),
                     "move_acum" => instructions.push(parse_move_acum(&mut it)),
@@ -259,6 +264,7 @@ fn simulate(instructions: &[Instruction], registers: &[u16; 8]) {
     while running {
         match instructions[state.program_counter as usize] {
             Instruction::Add(r1, r2, r3) => state.registers[r1 as usize] = state.registers[r2 as usize] + state.registers[r3 as usize],
+            Instruction::Sub(r1, r2, r3) => state.registers[r1 as usize] = state.registers[r2 as usize] - state.registers[r3 as usize],
             Instruction::LoadI(imm) => state.accumlator = imm as u32,
             Instruction::MoveAcum(move_type, reg) => {
                 let mut value = state.accumlator;
