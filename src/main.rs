@@ -287,13 +287,25 @@ fn simulate(instructions: &[Instruction], registers: &[u16; 8]) {
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    if args.len() < 3 {
+    if args.len() < 2 {
         println!("gpu16_sim <assembly file> <register file>");
         return;
     }
 
     let asm_file = &args[1];
-    let reg_file = &args[2];
+
+    let registers: [u16; 8] = if args.len() > 2 {
+        let reg_file = &args[2];
+        let reg_f = File::open(reg_file).expect("File not found");
+        let reader = BufReader::new(reg_f);
+        reader.lines()
+            .map(|line| line.unwrap().parse::<u16>().unwrap())
+            .collect::<Vec<u16>>()
+            .try_into()
+            .unwrap()
+    } else {
+        [0; 8]
+    };
 
     let asm_string = match fs::read_to_string(asm_file) {
         Ok(text) => text,
@@ -302,22 +314,6 @@ fn main() {
             return;
         }
     };
-
-    /* Load register values into array */
-    let reg_f = File::open(reg_file).expect("File not found");
-    let reader = BufReader::new(reg_f);
-    /* TODO probably want to add cleaner error handling here */
-    let registers: [u16; 8] = reader
-        .lines()
-        .map(|line| line.unwrap().parse::<u16>().unwrap())
-        .collect::<Vec<u16>>()
-        .try_into()
-        .unwrap();
-
-    if registers.len() != 8 {
-        println!("Regsiter file should have 8 registers!");
-        return;
-    }
 
     let instructions = parse(&asm_string).unwrap();
 
