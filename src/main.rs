@@ -96,14 +96,21 @@ fn lex(input: &String) -> Result<Vec<Token>, String> {
 }
 
 #[derive(Debug)]
+pub enum RegSource {
+    Reg,
+    AcumHigh,
+    AcumLow,
+}
+
+#[derive(Debug)]
 pub enum Instruction {
     /* Three reg ops */
-    Add(u8, u8, u8),
-    Sub(u8, u8, u8),
-    And(u8, u8, u8),
-    Xor(u8, u8, u8),
-    ShiftLeft(u8, u8, u8),
-    ShiftRight(u8, u8, u8),
+    Add(u8, u8, u8, RegSource),
+    Sub(u8, u8, u8, RegSource),
+    And(u8, u8, u8, RegSource),
+    Xor(u8, u8, u8, RegSource),
+    ShiftLeft(u8, u8, u8, RegSource),
+    ShiftRight(u8, u8, u8, RegSource),
 
     /* Two reg ops */
     Not(u8, u8),
@@ -113,21 +120,25 @@ pub enum Instruction {
     MoveAcum(bool, u8),
 }
 
+fn parse_reg_val(reg: &str) -> Result<u8, String> {
+    match reg {
+        "r0" => Ok(0),
+        "r1" => Ok(1),
+        "r2" => Ok(2),
+        "r3" => Ok(3),
+        "r4" => Ok(4),
+        "r5" => Ok(5),
+        "r6" => Ok(6),
+        "r7" => Ok(7),
+        _ => Err(format!("Expected register got {:?}", reg))
+    }
+}
+
 fn parse_reg<'a>(it: &mut impl Iterator<Item=&'a Token>) -> Result<u8, String> {
     let c = it.next().unwrap();
     match c {
         Token::Text(text) => {
-            match text.as_str() {
-                "r0" => Ok(0),
-                "r1" => Ok(1),
-                "r2" => Ok(2),
-                "r3" => Ok(3),
-                "r4" => Ok(4),
-                "r5" => Ok(5),
-                "r6" => Ok(6),
-                "r7" => Ok(7),
-                _ => Err(format!("Expected register got {:?}", text))
-            }
+            parse_reg_val(text.as_str())
         }
         _ => Err(format!("Expected register got {:?}", c))
     }
@@ -173,6 +184,55 @@ fn parse_three_reg<'a>(it: &mut impl Iterator<Item=&'a Token>, instr: &str) -> (
     }
 
     (r1, r2, r3)
+}
+
+
+fn parse_three_reg_all<'a>(it: &mut impl Iterator<Item=&'a Token>, instr: &str) -> (u8, u8, u8, RegSource) {
+    match it.next().unwrap() {
+        Token::Period => {
+            /* TODO This error checking feels really repetitive, is there a better way to do it? */
+            match it.next().unwrap() {
+                Token::Text(text) => {
+                    match text.as_str() {
+                        "acum" => (),
+                        unknown => panic!("Error parsing {} instruction, expected source type, got: {:?}", instr, unknown)
+                    }
+                }
+                unknown => panic!("Error parsing {} instruction, expected source type, got: {:?}", instr, unknown)
+            }
+
+            match it.next().unwrap() {
+                Token::Period => (),
+                unknown => panic!("Error parsing {} instruction, expected source type, got: {:?}", instr, unknown)
+            }
+
+            let source = match it.next().unwrap() {
+                Token::Text(text) => {
+                    match text.as_str() {
+                        "low" => RegSource::AcumLow,
+                        "high" => RegSource::AcumHigh,
+                        unknown => panic!("Error parsing {} instruction, expected source type, got: {:?}", instr, unknown)
+                    }
+                }
+                unknown => panic!("Error parsing {} instruction, expected source type, got: {:?}", instr, unknown)
+            };
+
+            let (rd, rs1) = parse_two_reg(it, instr);
+            (rd, rs1, 0, source)
+        }
+        Token::Text(text) => {
+            let r1 = parse_reg_val(text.as_str())
+                .expect(format!("Error parsing {} instruction, expected register got: {}", instr, text).as_str());
+            match it.next().unwrap() {
+                Token::Comma => (),
+                unknown => panic!("Error parsing {} instruction, expected comma, got: {:?}", instr, unknown)
+            };
+            let (r2, r3) = parse_two_reg(it, instr);
+
+            (r1, r2, r3, RegSource::Reg)
+        }
+        unknown => panic!("Error parsing {} instruction, got: {:?}", instr, unknown)
+    }
 }
 
 fn parse_immediate<'a>(it: &mut impl Iterator<Item=&'a Token>) -> Result<u16, String> {
@@ -226,28 +286,28 @@ fn parse_instructions(tokens: &[Token]) -> Result<Vec<Instruction>, String> {
             Token::Text(text) => {
                 match text.as_str() {
                     "add" => {
-                        let (r1, r2, r3) = parse_three_reg(&mut it, "add");
-                        instructions.push(Instruction::Add(r1, r2, r3));
+                        let (r1, r2, r3, source) = parse_three_reg_all(&mut it, "add");
+                        instructions.push(Instruction::Add(r1, r2, r3, source));
                     }
                     "sub" => {
-                        let (r1, r2, r3) = parse_three_reg(&mut it, "sub");
-                        instructions.push(Instruction::Sub(r1, r2, r3));
+                        let (r1, r2, r3, source) = parse_three_reg_all(&mut it, "add");
+                        instructions.push(Instruction::Sub(r1, r2, r3, source));
                     }
                     "and" => {
-                        let (r1, r2, r3) = parse_three_reg(&mut it, "and");
-                        instructions.push(Instruction::And(r1, r2, r3));
+                        let (r1, r2, r3, source) = parse_three_reg_all(&mut it, "add");
+                        instructions.push(Instruction::And(r1, r2, r3, source));
                     }
                     "xor" => {
-                        let (r1, r2, r3) = parse_three_reg(&mut it, "xor");
-                        instructions.push(Instruction::Xor(r1, r2, r3));
+                        let (r1, r2, r3, source) = parse_three_reg_all(&mut it, "add");
+                        instructions.push(Instruction::Xor(r1, r2, r3, source));
                     }
                     "shift_left" => {
-                        let (r1, r2, r3) = parse_three_reg(&mut it, "shift_left");
-                        instructions.push(Instruction::ShiftLeft(r1, r2, r3));
+                        let (r1, r2, r3, source) = parse_three_reg_all(&mut it, "add");
+                        instructions.push(Instruction::ShiftLeft(r1, r2, r3, source));
                     }
                     "shift_right" => {
-                        let (r1, r2, r3) = parse_three_reg(&mut it, "shift_right");
-                        instructions.push(Instruction::ShiftRight(r1, r2, r3));
+                        let (r1, r2, r3, source) = parse_three_reg_all(&mut it, "add");
+                        instructions.push(Instruction::ShiftRight(r1, r2, r3, source));
                     }
                     "not" => {
                         let(r1, r2) = parse_two_reg(&mut it, "not");
@@ -293,26 +353,52 @@ struct CpuState {
     program_counter: u32,
 }
 
+fn get_source2_value(state: &CpuState, rs2: u8, source: &RegSource) -> u16 {
+    match source {
+        RegSource::Reg => state.registers[rs2 as usize],
+        RegSource::AcumLow => state.accumlator as u16,
+        RegSource::AcumHigh => (state.accumlator >> 16) as u16,
+    }
+}
+
 fn simulate(instructions: &[Instruction], registers: &[u16; 8]) {
     let mut state = CpuState { registers: registers.clone(), accumlator: 0, program_counter: 0 };
     let mut running = true;
     while running {
-        match instructions[state.program_counter as usize] {
-            Instruction::Add(r1, r2, r3) => state.registers[r1 as usize] = state.registers[r2 as usize] + state.registers[r3 as usize],
-            Instruction::Sub(r1, r2, r3) => state.registers[r1 as usize] = state.registers[r2 as usize] - state.registers[r3 as usize],
-            Instruction::And(r1, r2, r3) => state.registers[r1 as usize] = state.registers[r2 as usize] & state.registers[r3 as usize],
-            Instruction::Xor(r1, r2, r3) => state.registers[r1 as usize] = state.registers[r2 as usize] ^ state.registers[r3 as usize],
-            Instruction::ShiftLeft(r1, r2, r3) => state.registers[r1 as usize] = state.registers[r2 as usize] << state.registers[r3 as usize],
-            Instruction::ShiftRight(r1, r2, r3) => state.registers[r1 as usize] = state.registers[r2 as usize] >> state.registers[r3 as usize],
-            Instruction::Not(r1, r2) => state.registers[r1 as usize] = !state.registers[r2 as usize],
-            Instruction::LoadI(imm) => state.accumlator = imm as u32,
+        match &instructions[state.program_counter as usize] {
+            Instruction::Add(rd, rs1, rs2, source) => {
+                let s2 = get_source2_value(&state, *rs2, source);
+                state.registers[*rd as usize] = state.registers[*rs1 as usize] + s2;
+            }
+            Instruction::Sub(rd, rs1, rs2, source) => {
+                let s2 = get_source2_value(&state, *rs2, source);
+                state.registers[*rd as usize] = state.registers[*rs1 as usize] - s2;
+            }
+            Instruction::And(rd, rs1, rs2, source) => {
+                let s2 = get_source2_value(&state, *rs2, source);
+                state.registers[*rd as usize] = state.registers[*rs1 as usize] & s2;
+            }
+            Instruction::Xor(rd, rs1, rs2, source) => {
+                let s2 = get_source2_value(&state, *rs2, source);
+                state.registers[*rd as usize] = state.registers[*rs1 as usize] ^ s2;
+            }
+            Instruction::ShiftLeft(rd, rs1, rs2, source) => {
+                let s2 = get_source2_value(&state, *rs2, source);
+                state.registers[*rd as usize] = state.registers[*rs1 as usize] << s2;
+            }
+            Instruction::ShiftRight(rd, rs1, rs2, source) => {
+                let s2 = get_source2_value(&state, *rs2, source);
+                state.registers[*rd as usize] = state.registers[*rs1 as usize] >> s2;
+            }
+            Instruction::Not(rd, rs1) => state.registers[*rd as usize] = !state.registers[*rs1 as usize],
+            Instruction::LoadI(imm) => state.accumlator = *imm as u32,
             Instruction::MoveAcum(move_type, reg) => {
                 let mut value = state.accumlator;
-                if move_type {
+                if *move_type {
                     value >>= 16;
                 }
 
-                state.registers[reg as usize] = value as u16;
+                state.registers[*reg as usize] = value as u16;
             }
         }
 

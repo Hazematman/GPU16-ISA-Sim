@@ -6,3 +6,6 @@ add r1, r2, r3
 loadi 63
 move_acum.low r4
 sub r5, r4, r3
+
+loadi 1337
+add.acum.low r6, r0
