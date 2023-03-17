@@ -117,7 +117,6 @@ pub enum Instruction {
 
     /* Special ops */
     LoadI(u16),
-    MoveAcum(bool, u8),
 }
 
 fn parse_reg_val(reg: &str) -> Result<u8, String> {
@@ -162,30 +161,6 @@ fn parse_two_reg<'a>(it: &mut impl Iterator<Item=&'a Token>, instr: &str) -> (u8
 
     (r1, r2)
 }
-
-fn parse_three_reg<'a>(it: &mut impl Iterator<Item=&'a Token>, instr: &str) -> (u8, u8, u8) {
-    let (r1, r2) = parse_two_reg(it, instr);
-
-    match it.next().unwrap() {
-        Token::Comma => (),
-        unknown => panic!("Error parsing {} instruction, expected comma, got: {:?}", instr, unknown)
-    };
-
-    let r3 = match parse_reg(it) {
-        Ok(reg) => reg,
-        Err(message) => panic!("Error parsing {} instruction, expected register, got: {:?}", instr, message)
-    };
-
-    /* Expect comment or newline at the end */
-    match it.next().unwrap() {
-        Token::Comment(_) => (),
-        Token::NewLine => (),
-        unknown => panic!("Error parsing {} instruction, expected end of line, got: {:?}", instr, unknown)
-    }
-
-    (r1, r2, r3)
-}
-
 
 fn parse_three_reg_all<'a>(it: &mut impl Iterator<Item=&'a Token>, instr: &str) -> (u8, u8, u8, RegSource) {
     match it.next().unwrap() {
@@ -252,31 +227,6 @@ fn parse_load_immediate<'a>(it: &mut impl Iterator<Item=&'a Token>) -> Instructi
     Instruction::LoadI(imm)
 }
 
-fn parse_move_acum<'a>(it: &mut impl Iterator<Item=&'a Token>) -> Instruction {
-    match it.next().unwrap() {
-        Token::Period => (),
-        unknown => panic!("Error parsing move_acum, expected type, got: {:?}", unknown)
-    }
-
-    let move_type = match it.next().unwrap() {
-        Token::Text(text) => {
-            match text.as_str() {
-                "high" => true,
-                "low" => false,
-                unknown => panic!("Error parsing move_acum, expected type, got: {:?}", unknown)
-            }
-        }
-        unknown => panic!("Error parsing move_acum, expected type, got: {:?}", unknown)
-    };
-
-    let reg = match parse_reg(it) {
-        Ok(reg) => reg,
-        Err(message) => panic!("Error parsing move_acum, expected register, got: {:?}", message)
-    };
-
-    Instruction::MoveAcum(move_type, reg)
-}
-
 fn parse_instructions(tokens: &[Token]) -> Result<Vec<Instruction>, String> {
     let mut instructions = Vec::new();
     let mut it = tokens.iter();
@@ -314,7 +264,6 @@ fn parse_instructions(tokens: &[Token]) -> Result<Vec<Instruction>, String> {
                         instructions.push(Instruction::Not(r1, r2));
                     }
                     "loadi" => instructions.push(parse_load_immediate(&mut it)),
-                    "move_acum" => instructions.push(parse_move_acum(&mut it)),
                     _ => {
                         return Err(format!("Unknown instruction {:?}", text))
                     }
@@ -392,14 +341,6 @@ fn simulate(instructions: &[Instruction], registers: &[u16; 8]) {
             }
             Instruction::Not(rd, rs1) => state.registers[*rd as usize] = !state.registers[*rs1 as usize],
             Instruction::LoadI(imm) => state.accumlator = *imm as u32,
-            Instruction::MoveAcum(move_type, reg) => {
-                let mut value = state.accumlator;
-                if *move_type {
-                    value >>= 16;
-                }
-
-                state.registers[*reg as usize] = value as u16;
-            }
         }
 
         state.program_counter += 1;
