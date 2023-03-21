@@ -115,6 +115,10 @@ pub enum Instruction {
     /* Two reg ops */
     Not(u8, u8),
 
+    /* Load store ops */
+    Load(u8, u8, u16),
+    Store(u8, u8, u16),
+
     /* Special ops */
     LoadI(u16),
 }
@@ -227,6 +231,19 @@ fn parse_load_immediate<'a>(it: &mut impl Iterator<Item=&'a Token>) -> Instructi
     Instruction::LoadI(imm)
 }
 
+fn parse_two_reg_imm<'a>(it: &mut impl Iterator<Item=&'a Token>, instr: &str) -> (u8, u8, u16) {
+    let (rd, rs) = parse_two_reg(it, instr);
+
+    match it.next().unwrap() {
+        Token::Comma => (),
+        unknown => panic!("Error parsing {} instruction, expected comma, got: {:?}", instr, unknown)
+    };
+
+    let imm = parse_immediate(it).expect("Expected immediate value");
+
+    (rd, rs, imm)
+}
+
 fn parse_instructions(tokens: &[Token]) -> Result<Vec<Instruction>, String> {
     let mut instructions = Vec::new();
     let mut it = tokens.iter();
@@ -263,6 +280,14 @@ fn parse_instructions(tokens: &[Token]) -> Result<Vec<Instruction>, String> {
                         let(r1, r2) = parse_two_reg(&mut it, "not");
                         instructions.push(Instruction::Not(r1, r2));
                     }
+                    "load" => {
+                        let(rd, rs, imm) = parse_two_reg_imm(&mut it, "load");
+                        instructions.push(Instruction::Load(rd, rs, imm));
+                    }
+                    "store" => {
+                        let(rd, rs, imm) = parse_two_reg_imm(&mut it, "store");
+                        instructions.push(Instruction::Store(rd, rs, imm));
+                    }
                     "loadi" => instructions.push(parse_load_immediate(&mut it)),
                     _ => {
                         return Err(format!("Unknown instruction {:?}", text))
@@ -298,20 +323,33 @@ fn parse(input: &String) -> Result<Vec<Instruction>, String> {
 #[derive(Debug)]
 struct CpuState {
     registers: [u16; 8],
-    accumlator: u32,
+    accumulator: u32,
     program_counter: u32,
+    memory: [u16; 64*1024],
+}
+
+impl fmt::Display for CpuState {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Registers: {:?}\nAccumlator: {}\nProgram Counter {}", self.registers,
+            self.accumulator, self.program_counter)
+    }
 }
 
 fn get_source2_value(state: &CpuState, rs2: u8, source: &RegSource) -> u16 {
     match source {
         RegSource::Reg => state.registers[rs2 as usize],
-        RegSource::AcumLow => state.accumlator as u16,
-        RegSource::AcumHigh => (state.accumlator >> 16) as u16,
+        RegSource::AcumLow => state.accumulator as u16,
+        RegSource::AcumHigh => (state.accumulator >> 16) as u16,
     }
 }
 
 fn simulate(instructions: &[Instruction], registers: &[u16; 8]) {
-    let mut state = CpuState { registers: registers.clone(), accumlator: 0, program_counter: 0 };
+    let mut state = CpuState {
+        registers: registers.clone(),
+        accumulator: 0,
+        program_counter: 0,
+        memory: [0; 64*1024]};
+
     let mut running = true;
     while running {
         match &instructions[state.program_counter as usize] {
@@ -340,7 +378,13 @@ fn simulate(instructions: &[Instruction], registers: &[u16; 8]) {
                 state.registers[*rd as usize] = state.registers[*rs1 as usize] >> s2;
             }
             Instruction::Not(rd, rs1) => state.registers[*rd as usize] = !state.registers[*rs1 as usize],
-            Instruction::LoadI(imm) => state.accumlator = *imm as u32,
+            Instruction::Load(rd, rs, imm) => {
+                state.registers[*rs as usize] = state.memory[(*rd as u16 + *imm) as usize];
+            }
+            Instruction::Store(rd, rs, imm) => {
+                state.memory[(*rd as u16 + *imm) as usize] = state.registers[*rs as usize];
+            }
+            Instruction::LoadI(imm) => state.accumulator = *imm as u32,
         }
 
         state.program_counter += 1;
@@ -349,7 +393,7 @@ fn simulate(instructions: &[Instruction], registers: &[u16; 8]) {
         }
     }
 
-    println!("CPU state is ${:?}", state);
+    println!("CPU state is\n{}", state);
 }
 
 fn main() {
