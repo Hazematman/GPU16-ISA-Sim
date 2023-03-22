@@ -103,6 +103,27 @@ pub enum RegSource {
 }
 
 #[derive(Debug)]
+pub enum MultSet {
+    Set,
+    Accum
+}
+
+#[derive(Debug)]
+pub enum MultSign {
+    UnsignedUnsigned,
+    SignedUnsigned,
+    UnsignedSigned,
+    SignedSigned
+}
+
+#[derive(Debug)]
+pub enum MultShift {
+    No,
+    Up,
+    Down
+}
+
+#[derive(Debug)]
 pub enum Instruction {
     /* Three reg ops */
     Add(u8, u8, u8, RegSource),
@@ -114,6 +135,9 @@ pub enum Instruction {
 
     /* Two reg ops */
     Not(u8, u8),
+
+    /* Mult op */
+    Mult(u8, u8, MultSet, MultSign, MultShift),
 
     /* Load store ops */
     Load(u8, u8, u16),
@@ -173,7 +197,7 @@ fn parse_three_reg_all<'a>(it: &mut impl Iterator<Item=&'a Token>, instr: &str) 
             match it.next().unwrap() {
                 Token::Text(text) => {
                     match text.as_str() {
-                        "acum" => (),
+                        "accum" => (),
                         unknown => panic!("Error parsing {} instruction, expected source type, got: {:?}", instr, unknown)
                     }
                 }
@@ -244,6 +268,65 @@ fn parse_two_reg_imm<'a>(it: &mut impl Iterator<Item=&'a Token>, instr: &str) ->
     (rd, rs, imm)
 }
 
+fn parse_mult<'a>(it: &mut impl Iterator<Item=&'a Token>) -> (u8, u8, MultSet, MultSign, MultShift) {
+    let instr = "mult";
+
+    match it.next().unwrap() {
+        Token::Period => (),
+        unknown => panic!("Error parsing {} instruction, expected source type, got: {:?}", instr, unknown)
+    }
+
+    let mult_set = match it.next().unwrap() {
+        Token::Text(text) => {
+            match text.as_str() {
+                "set" => MultSet::Set,
+                "accum" => MultSet::Accum,
+                unknown => panic!("Error parsing {} instruction, expected mult set, got: {:?}", instr, unknown)
+            }
+        }
+        unknown => panic!("Error parsing {} instruction, expected mult set, got: {:?}", instr, unknown)
+    };
+
+    match it.next().unwrap() {
+        Token::Period => (),
+        unknown => panic!("Error parsing {} instruction, expected source type, got: {:?}", instr, unknown)
+    }
+
+    let mult_sign = match it.next().unwrap() {
+        Token::Text(text) => {
+            match text.as_str() {
+                "u16_u16" => MultSign::UnsignedUnsigned,
+                "u16_s16" => MultSign::UnsignedSigned,
+                "s16_u16" => MultSign::SignedUnsigned,
+                "s16_s16" => MultSign::SignedSigned,
+                unknown => panic!("Error parsing {} instruction, expected mult sign, got: {:?}", instr, unknown)
+            }
+        }
+        unknown => panic!("Error parsing {} instruction, expected mult sign, got: {:?}", instr, unknown)
+    };
+
+    match it.next().unwrap() {
+        Token::Period => (),
+        unknown => panic!("Error parsing {} instruction, expected source type, got: {:?}", instr, unknown)
+    }
+
+    let mult_shift = match it.next().unwrap() {
+        Token::Text(text) => {
+            match text.as_str() {
+                "up" => MultShift::Up,
+                "down" => MultShift::Down,
+                "no" => MultShift::No,
+                unknown => panic!("Error parsing {} instruction, expected mult shift, got: {:?}", instr, unknown)
+            }
+        }
+        unknown => panic!("Error parsing {} instruction, expected mult shift, got: {:?}", instr, unknown)
+    };
+
+    let (rs1, rs2) = parse_two_reg(it, instr);
+
+    (rs1, rs2, mult_set, mult_sign, mult_shift)
+}
+
 fn parse_instructions(tokens: &[Token]) -> Result<Vec<Instruction>, String> {
     let mut instructions = Vec::new();
     let mut it = tokens.iter();
@@ -279,6 +362,10 @@ fn parse_instructions(tokens: &[Token]) -> Result<Vec<Instruction>, String> {
                     "not" => {
                         let(r1, r2) = parse_two_reg(&mut it, "not");
                         instructions.push(Instruction::Not(r1, r2));
+                    }
+                    "mult" => {
+                        let(rs1, rs2, set, sign, shift) = parse_mult(&mut it);
+                        instructions.push(Instruction::Mult(rs1, rs2, set, sign, shift));
                     }
                     "load" => {
                         let(rd, rs, imm) = parse_two_reg_imm(&mut it, "load");
@@ -359,7 +446,7 @@ fn simulate(instructions: &[Instruction], registers: &[u16; 8]) {
             }
             Instruction::Sub(rd, rs1, rs2, source) => {
                 let s2 = get_source2_value(&state, *rs2, source);
-                state.registers[*rd as usize] = state.registers[*rs1 as usize] - s2;
+                state.registers[*rd as usize] = state.registers[*rs1 as usize].wrapping_sub(s2);
             }
             Instruction::And(rd, rs1, rs2, source) => {
                 let s2 = get_source2_value(&state, *rs2, source);
@@ -378,6 +465,30 @@ fn simulate(instructions: &[Instruction], registers: &[u16; 8]) {
                 state.registers[*rd as usize] = state.registers[*rs1 as usize] >> s2;
             }
             Instruction::Not(rd, rs1) => state.registers[*rd as usize] = !state.registers[*rs1 as usize],
+            Instruction::Mult(rs1, rs2, mult_set, mult_sign, mult_shift) => {
+                let a = state.registers[*rs1 as usize];
+                let b = state.registers[*rs2 as usize];
+
+                let result = match mult_sign {
+                    MultSign::UnsignedUnsigned => ((a as u32) * (b as u32)) as u32,
+                    MultSign::UnsignedSigned => ((a as i32) * (b as i16) as i32) as u32,
+                    MultSign::SignedUnsigned => ((a as i16) as i32 * (b as i32)) as u32,
+                    MultSign::SignedSigned => ((a as i16) as i32 * (b as i16) as i32) as u32
+                };
+
+                let shift = match mult_shift {
+                    MultShift::Up => result << 16,
+                    MultShift::Down => result >> 16,
+                    MultShift::No => result
+                };
+
+                let final_result = match mult_set {
+                    MultSet::Set => shift,
+                    MultSet::Accum => shift + state.accumulator
+                };
+
+                state.accumulator = final_result;
+            }
             Instruction::Load(rd, rs, imm) => {
                 state.registers[*rs as usize] = state.memory[(*rd as u16 + *imm) as usize];
             }
