@@ -1,4 +1,5 @@
 use std::*;
+use std::collections::HashMap;
 use std::iter::*;
 use std::fs::File;
 use std::io::BufRead;
@@ -11,6 +12,7 @@ pub enum Token {
     NewLine,
     Comma,
     Period,
+    Colon,
     Comment(String),
     LabelMarker(char),
 }
@@ -79,6 +81,10 @@ fn lex(input: &String) -> Result<Vec<Token>, String> {
                 it.next();
                 result.push(Token::Period);
             }
+            ':' => {
+                it.next();
+                result.push(Token::Colon);
+            }
             c if c.is_alphabetic() => {
                 let text = get_text(&mut it);
                 result.push(Token::Text(text));
@@ -143,8 +149,12 @@ pub enum Instruction {
     Load(u8, u8, u16),
     Store(u8, u8, u16),
 
+    /* Branching ops */
+    Jump(u8),
+
     /* Special ops */
     LoadI(u16),
+    LoadAddr(String), // This is another form of LoadI, just a psuedo op
 }
 
 fn parse_reg_val(reg: &str) -> Result<u8, String> {
@@ -255,6 +265,16 @@ fn parse_load_immediate<'a>(it: &mut impl Iterator<Item=&'a Token>) -> Instructi
     Instruction::LoadI(imm)
 }
 
+fn parse_load_addr<'a>(it: &mut impl Iterator<Item=&'a Token>) -> Instruction {
+    let c = it.next().unwrap();
+    let label = match c {
+        Token::Text(s) => s.clone(),
+        _ => panic!("Failed to parse label in load_addr")
+    };
+
+    Instruction::LoadAddr(label)
+}
+
 fn parse_two_reg_imm<'a>(it: &mut impl Iterator<Item=&'a Token>, instr: &str) -> (u8, u8, u16) {
     let (rd, rs) = parse_two_reg(it, instr);
 
@@ -327,9 +347,10 @@ fn parse_mult<'a>(it: &mut impl Iterator<Item=&'a Token>) -> (u8, u8, MultSet, M
     (rs1, rs2, mult_set, mult_sign, mult_shift)
 }
 
-fn parse_instructions(tokens: &[Token]) -> Result<Vec<Instruction>, String> {
+fn parse_instructions(tokens: &[Token]) -> Result<(Vec<Instruction>, HashMap<String, usize>), String> {
     let mut instructions = Vec::new();
-    let mut it = tokens.iter();
+    let mut it = tokens.iter().peekable();
+    let mut labels: HashMap<String, usize> = HashMap::new();
 
     while let Some(&ref t) = it.next() {
         match t {
@@ -375,9 +396,23 @@ fn parse_instructions(tokens: &[Token]) -> Result<Vec<Instruction>, String> {
                         let(rd, rs, imm) = parse_two_reg_imm(&mut it, "store");
                         instructions.push(Instruction::Store(rd, rs, imm));
                     }
+                    "jump" => {
+                        let rs = parse_reg(&mut it).unwrap();
+                        instructions.push(Instruction::Jump(rs));
+                    }
                     "loadi" => instructions.push(parse_load_immediate(&mut it)),
+                    "load_addr" => instructions.push(parse_load_addr(&mut it)),
                     _ => {
-                        return Err(format!("Unknown instruction {:?}", text))
+                        match it.peek().unwrap() {
+                            Token::Colon => {
+                                it.next();
+                                labels.insert(
+                                    text.clone(),
+                                    instructions.len()-1
+                                );
+                            }
+                            _ => return Err(format!("Unknown instruction {:?}", text))
+                        };
                     }
                 }
             }
@@ -390,10 +425,10 @@ fn parse_instructions(tokens: &[Token]) -> Result<Vec<Instruction>, String> {
         }
     }
 
-    Ok(instructions)
+    Ok((instructions, labels))
 }
 
-fn parse(input: &String) -> Result<Vec<Instruction>, String> {
+fn parse(input: &String) -> Result<(Vec<Instruction>, HashMap<String, usize>), String> {
     let tokens = lex(input).unwrap();
 
     /*
@@ -402,9 +437,9 @@ fn parse(input: &String) -> Result<Vec<Instruction>, String> {
     }
     */
 
-    let instructions = parse_instructions(tokens.as_slice()).unwrap();
+    let (instructions, labels) = parse_instructions(tokens.as_slice()).unwrap();
 
-    Ok(instructions)
+    Ok((instructions, labels))
 }
 
 #[derive(Debug)]
@@ -430,7 +465,7 @@ fn get_source2_value(state: &CpuState, rs2: u8, source: &RegSource) -> u16 {
     }
 }
 
-fn simulate(instructions: &[Instruction], registers: &[u16; 8]) {
+fn simulate(instructions: &[Instruction], labels: &HashMap<String, usize>, registers: &[u16; 8]) {
     let mut state = CpuState {
         registers: registers.clone(),
         accumulator: 0,
@@ -489,6 +524,9 @@ fn simulate(instructions: &[Instruction], registers: &[u16; 8]) {
 
                 state.accumulator = final_result;
             }
+            Instruction::Jump(rs) => {
+                state.program_counter = state.registers[*rs as usize] as u32;
+            }
             Instruction::Load(rd, rs, imm) => {
                 state.registers[*rs as usize] = state.memory[(*rd as u16 + *imm) as usize];
             }
@@ -496,6 +534,14 @@ fn simulate(instructions: &[Instruction], registers: &[u16; 8]) {
                 state.memory[(*rd as u16 + *imm) as usize] = state.registers[*rs as usize];
             }
             Instruction::LoadI(imm) => state.accumulator = *imm as u32,
+            Instruction::LoadAddr(label) => {
+                let addr = match labels.get(label) {
+                    Some(l) => *l as u32,
+                    None => panic!("No label {} to load", label)
+                };
+
+                state.accumulator = addr;
+            }
         }
 
         state.program_counter += 1;
@@ -537,11 +583,11 @@ fn main() {
         }
     };
 
-    let instructions = parse(&asm_string).unwrap();
+    let (instructions, labels) = parse(&asm_string).unwrap();
 
     for instruction in &instructions {
         println!("Instruction is {:?}", instruction)
     }
 
-    simulate(instructions.as_slice(), &registers)
+    simulate(instructions.as_slice(), &labels, &registers)
 }
