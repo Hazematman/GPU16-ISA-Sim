@@ -151,6 +151,7 @@ pub enum Instruction {
 
     /* Branching ops */
     Jump(u8),
+    Branch(bool, bool, bool, u16),
 
     /* Special ops */
     LoadI(u16),
@@ -347,6 +348,66 @@ fn parse_mult<'a>(it: &mut impl Iterator<Item=&'a Token>) -> (u8, u8, MultSet, M
     (rs1, rs2, mult_set, mult_sign, mult_shift)
 }
 
+#[derive(Debug)]
+pub enum FlagType {
+    Zero,
+    Positive,
+    Negative,
+}
+
+#[derive(Debug)]
+pub enum BranchType {
+    Flag(FlagType),
+    Imm(u16),
+}
+
+fn parse_branch_next_field<'a>(it: &mut impl Iterator<Item=&'a Token>) -> BranchType {
+    match it.next().unwrap() {
+        Token::Period => {
+            let branch_type = match it.next().unwrap() {
+                Token::Text(text) => text.as_str(),
+                x => panic!("Error parsing branch instruction, expected branch type, got: {:?}", x)
+            };
+
+            match branch_type {
+                "zero" => BranchType::Flag(FlagType::Zero),
+                "negative" => BranchType::Flag(FlagType::Negative),
+                "positive" => BranchType::Flag(FlagType::Positive),
+                x => panic!("Error parsing branch instruction, expected branch type, got: {:?}", x)
+            }
+        }
+        Token::Number(x) => {
+            let signed_x = if *x & 0x80u16 != 0 { *x as u16 | 0xFF00u16 } else { *x as u16 };
+            BranchType::Imm(signed_x)
+        }
+        x => panic!("Error parsing branch instruction, expected branch type, got: {:?}", x)
+    }
+}
+
+fn parse_branch<'a>(it: &mut impl Iterator<Item=&'a Token>) -> Instruction {
+    let mut zero = false;
+    let mut positive = false;
+    let mut negative = false;
+    let mut imm = 0u16;
+    for _i in 0..3 {
+        match parse_branch_next_field(it) {
+            BranchType::Imm(num) => {
+                imm = num;
+                break;
+            }
+            BranchType::Flag(flag) => {
+                match flag {
+                    FlagType::Zero => zero = true,
+                    FlagType::Positive => positive = true,
+                    FlagType::Negative => negative = true,
+                }
+            }
+        }
+    }
+
+    Instruction::Branch(negative, zero, positive, imm)
+}
+
 fn parse_instructions(tokens: &[Token]) -> Result<(Vec<Instruction>, HashMap<String, usize>), String> {
     let mut instructions = Vec::new();
     let mut it = tokens.iter().peekable();
@@ -400,6 +461,9 @@ fn parse_instructions(tokens: &[Token]) -> Result<(Vec<Instruction>, HashMap<Str
                         let rs = parse_reg(&mut it).unwrap();
                         instructions.push(Instruction::Jump(rs));
                     }
+                    "branch" => {
+                        instructions.push(parse_branch(&mut it));
+                    }
                     "loadi" => instructions.push(parse_load_immediate(&mut it)),
                     "load_addr" => instructions.push(parse_load_addr(&mut it)),
                     _ => {
@@ -412,7 +476,7 @@ fn parse_instructions(tokens: &[Token]) -> Result<(Vec<Instruction>, HashMap<Str
                                 );
                             }
                             _ => return Err(format!("Unknown instruction {:?}", text))
-                        };
+                        }
                     }
                 }
             }
@@ -445,6 +509,9 @@ fn parse(input: &String) -> Result<(Vec<Instruction>, HashMap<String, usize>), S
 #[derive(Debug)]
 struct CpuState {
     registers: [u16; 8],
+    negative: bool,
+    zero: bool,
+    positive: bool,
     accumulator: u32,
     program_counter: u32,
     memory: [u16; 64*1024],
@@ -465,41 +532,67 @@ fn get_source2_value(state: &CpuState, rs2: u8, source: &RegSource) -> u16 {
     }
 }
 
+fn set_flags(state: &mut CpuState, result: u16) {
+    state.zero = result == 0;
+    state.positive = (result as i16) > 0;
+    state.negative = (result as i16) > 0;
+}
+
 fn simulate(instructions: &[Instruction], labels: &HashMap<String, usize>, registers: &[u16; 8]) {
     let mut state = CpuState {
         registers: registers.clone(),
+        negative: false,
+        zero: false,
+        positive: false,
         accumulator: 0,
         program_counter: 0,
-        memory: [0; 64*1024]};
+        memory: [0; 64*1024]
+    };
 
     let mut running = true;
     while running {
         match &instructions[state.program_counter as usize] {
             Instruction::Add(rd, rs1, rs2, source) => {
                 let s2 = get_source2_value(&state, *rs2, source);
-                state.registers[*rd as usize] = state.registers[*rs1 as usize] + s2;
+                let result = state.registers[*rs1 as usize] + s2;
+                set_flags(&mut state, result);
+                state.registers[*rd as usize] = result;
             }
             Instruction::Sub(rd, rs1, rs2, source) => {
                 let s2 = get_source2_value(&state, *rs2, source);
-                state.registers[*rd as usize] = state.registers[*rs1 as usize].wrapping_sub(s2);
+                let result = state.registers[*rs1 as usize].wrapping_sub(s2);
+                set_flags(&mut state, result);
+                state.registers[*rd as usize] = result;
             }
             Instruction::And(rd, rs1, rs2, source) => {
                 let s2 = get_source2_value(&state, *rs2, source);
-                state.registers[*rd as usize] = state.registers[*rs1 as usize] & s2;
+                let result = state.registers[*rs1 as usize] & s2;
+                set_flags(&mut state, result);
+                state.registers[*rd as usize] = result;
             }
             Instruction::Xor(rd, rs1, rs2, source) => {
                 let s2 = get_source2_value(&state, *rs2, source);
-                state.registers[*rd as usize] = state.registers[*rs1 as usize] ^ s2;
+                let result = state.registers[*rs1 as usize] ^ s2;
+                set_flags(&mut state, result);
+                state.registers[*rd as usize] = result;
             }
             Instruction::ShiftLeft(rd, rs1, rs2, source) => {
                 let s2 = get_source2_value(&state, *rs2, source);
-                state.registers[*rd as usize] = state.registers[*rs1 as usize] << s2;
+                let result = state.registers[*rs1 as usize] << s2;
+                set_flags(&mut state, result);
+                state.registers[*rd as usize] = result;
             }
             Instruction::ShiftRight(rd, rs1, rs2, source) => {
                 let s2 = get_source2_value(&state, *rs2, source);
-                state.registers[*rd as usize] = state.registers[*rs1 as usize] >> s2;
+                let result = state.registers[*rs1 as usize] >> s2;
+                set_flags(&mut state, result);
+                state.registers[*rd as usize] = result;
             }
-            Instruction::Not(rd, rs1) => state.registers[*rd as usize] = !state.registers[*rs1 as usize],
+            Instruction::Not(rd, rs1) => {
+                let result = !state.registers[*rs1 as usize];
+                set_flags(&mut state, result);
+                state.registers[*rd as usize] = result;
+            }
             Instruction::Mult(rs1, rs2, mult_set, mult_sign, mult_shift) => {
                 let a = state.registers[*rs1 as usize];
                 let b = state.registers[*rs2 as usize];
@@ -526,6 +619,11 @@ fn simulate(instructions: &[Instruction], labels: &HashMap<String, usize>, regis
             }
             Instruction::Jump(rs) => {
                 state.program_counter = state.registers[*rs as usize] as u32;
+            }
+            Instruction::Branch(neg, zero, pos, imm) => {
+                if (*neg && state.negative) || (*zero && state.zero) || (*pos && state.positive) {
+                    state.program_counter += (*imm as i32) as u32;
+                }
             }
             Instruction::Load(rd, rs, imm) => {
                 state.registers[*rs as usize] = state.memory[(*rd as u16 + *imm) as usize];
