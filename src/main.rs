@@ -151,7 +151,7 @@ pub enum Instruction {
 
     /* Branching ops */
     Jump(u8),
-    Branch(bool, bool, bool, u16),
+    Branch(bool, bool, bool, String),
 
     /* Special ops */
     LoadI(u16),
@@ -358,7 +358,7 @@ pub enum FlagType {
 #[derive(Debug)]
 pub enum BranchType {
     Flag(FlagType),
-    Imm(u16),
+    Imm(String),
 }
 
 fn parse_branch_next_field<'a>(it: &mut impl Iterator<Item=&'a Token>) -> BranchType {
@@ -376,9 +376,8 @@ fn parse_branch_next_field<'a>(it: &mut impl Iterator<Item=&'a Token>) -> Branch
                 x => panic!("Error parsing branch instruction, expected branch type, got: {:?}", x)
             }
         }
-        Token::Number(x) => {
-            let signed_x = if *x & 0x80u16 != 0 { *x as u16 | 0xFF00u16 } else { *x as u16 };
-            BranchType::Imm(signed_x)
+        Token::Text(text) => {
+            BranchType::Imm(text.clone())
         }
         x => panic!("Error parsing branch instruction, expected branch type, got: {:?}", x)
     }
@@ -388,7 +387,7 @@ fn parse_branch<'a>(it: &mut impl Iterator<Item=&'a Token>) -> Instruction {
     let mut zero = false;
     let mut positive = false;
     let mut negative = false;
-    let mut imm = 0u16;
+    let mut imm = "".to_string();
     for _i in 0..3 {
         match parse_branch_next_field(it) {
             BranchType::Imm(num) => {
@@ -535,7 +534,7 @@ fn get_source2_value(state: &CpuState, rs2: u8, source: &RegSource) -> u16 {
 fn set_flags(state: &mut CpuState, result: u16) {
     state.zero = result == 0;
     state.positive = (result as i16) > 0;
-    state.negative = (result as i16) > 0;
+    state.negative = (result as i16) < 0;
 }
 
 fn simulate(instructions: &[Instruction], labels: &HashMap<String, usize>, registers: &[u16; 8]) {
@@ -621,8 +620,17 @@ fn simulate(instructions: &[Instruction], labels: &HashMap<String, usize>, regis
                 state.program_counter = state.registers[*rs as usize] as u32;
             }
             Instruction::Branch(neg, zero, pos, imm) => {
+                let addr = match labels.get(imm) {
+                    Some(l) => *l as u32,
+                    None => panic!("No label {} to load", imm)
+                };
+                let diff = (addr as i64) - (state.program_counter as i64);
+                if diff < -128 || diff > 127 {
+                    panic!("Tried to branch to label too far away")
+                }
+
                 if (*neg && state.negative) || (*zero && state.zero) || (*pos && state.positive) {
-                    state.program_counter += (*imm as i32) as u32;
+                    state.program_counter = addr;
                 }
             }
             Instruction::Load(rd, rs, imm) => {
