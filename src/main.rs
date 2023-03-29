@@ -1,9 +1,6 @@
 use std::*;
 use std::collections::HashMap;
 use std::iter::*;
-use std::fs::File;
-use std::io::BufRead;
-use std::io::BufReader;
 
 #[derive(Debug)]
 pub enum Token {
@@ -506,24 +503,45 @@ fn parse(input: &String) -> Result<(Vec<Instruction>, HashMap<String, usize>), S
 }
 
 #[derive(Debug)]
-struct CpuState {
+struct CpuCore {
+    thread_id: u8,
     registers: [u16; 8],
     negative: bool,
     zero: bool,
     positive: bool,
     accumulator: u32,
-    program_counter: u32,
+}
+
+#[derive(Debug)]
+struct CpuState {
+    cores: [CpuCore; 4],
+    program_counter: u16,
     memory: [u16; 64*1024],
 }
 
 impl fmt::Display for CpuState {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Registers: {:?}\nAccumlator: {}\nProgram Counter {}", self.registers,
-            self.accumulator, self.program_counter)
+        for core in &self.cores {
+            write!(f, "{:?}\n", core).unwrap();
+        }
+        write!(f, "program counter {}", self.program_counter)
     }
 }
 
-fn get_source2_value(state: &CpuState, rs2: u8, source: &RegSource) -> u16 {
+impl Default for CpuCore {
+    fn default() -> CpuCore {
+        CpuCore {
+            thread_id: 0u8,
+            registers: [0u16; 8],
+            negative: false,
+            zero: false,
+            positive: false,
+            accumulator: 0u32
+        }
+    }
+}
+
+fn get_source2_value(state: &CpuCore, rs2: u8, source: &RegSource) -> u16 {
     match source {
         RegSource::Reg => state.registers[rs2 as usize],
         RegSource::AcumLow => state.accumulator as u16,
@@ -531,19 +549,20 @@ fn get_source2_value(state: &CpuState, rs2: u8, source: &RegSource) -> u16 {
     }
 }
 
-fn set_flags(state: &mut CpuState, result: u16) {
+fn set_flags(state: &mut CpuCore, result: u16) {
     state.zero = result == 0;
     state.positive = (result as i16) > 0;
     state.negative = (result as i16) < 0;
 }
 
-fn simulate(instructions: &[Instruction], labels: &HashMap<String, usize>, registers: &[u16; 8]) {
+fn simulate(instructions: &[Instruction], labels: &HashMap<String, usize>) {
     let mut state = CpuState {
-        registers: registers.clone(),
-        negative: false,
-        zero: false,
-        positive: false,
-        accumulator: 0,
+        cores: [
+            CpuCore {thread_id: 0, ..Default::default() },
+            CpuCore {thread_id: 1, ..Default::default() },
+            CpuCore {thread_id: 2, ..Default::default() },
+            CpuCore {thread_id: 3, ..Default::default() }
+        ],
         program_counter: 0,
         memory: [0; 64*1024]
     };
@@ -552,101 +571,129 @@ fn simulate(instructions: &[Instruction], labels: &HashMap<String, usize>, regis
     while running {
         match &instructions[state.program_counter as usize] {
             Instruction::Add(rd, rs1, rs2, source) => {
-                let s2 = get_source2_value(&state, *rs2, source);
-                let result = state.registers[*rs1 as usize] + s2;
-                set_flags(&mut state, result);
-                state.registers[*rd as usize] = result;
+                for mut core in &mut state.cores {
+                    let s2 = get_source2_value(&core, *rs2, source);
+                    let result = core.registers[*rs1 as usize] + s2;
+                    set_flags(&mut core, result);
+                    core.registers[*rd as usize] = result;
+                }
             }
             Instruction::Sub(rd, rs1, rs2, source) => {
-                let s2 = get_source2_value(&state, *rs2, source);
-                let result = state.registers[*rs1 as usize].wrapping_sub(s2);
-                set_flags(&mut state, result);
-                state.registers[*rd as usize] = result;
+                for mut core in &mut state.cores {
+                    let s2 = get_source2_value(&core, *rs2, source);
+                    let result = core.registers[*rs1 as usize].wrapping_sub(s2);
+                    set_flags(&mut core, result);
+                    core.registers[*rd as usize] = result;
+                }
             }
             Instruction::And(rd, rs1, rs2, source) => {
-                let s2 = get_source2_value(&state, *rs2, source);
-                let result = state.registers[*rs1 as usize] & s2;
-                set_flags(&mut state, result);
-                state.registers[*rd as usize] = result;
+                for mut core in &mut state.cores {
+                    let s2 = get_source2_value(&core, *rs2, source);
+                    let result = core.registers[*rs1 as usize] & s2;
+                    set_flags(&mut core, result);
+                    core.registers[*rd as usize] = result;
+                }
             }
             Instruction::Xor(rd, rs1, rs2, source) => {
-                let s2 = get_source2_value(&state, *rs2, source);
-                let result = state.registers[*rs1 as usize] ^ s2;
-                set_flags(&mut state, result);
-                state.registers[*rd as usize] = result;
+                for mut core in &mut state.cores {
+                    let s2 = get_source2_value(&core, *rs2, source);
+                    let result = core.registers[*rs1 as usize] ^ s2;
+                    set_flags(&mut core, result);
+                    core.registers[*rd as usize] = result;
+                }
             }
             Instruction::ShiftLeft(rd, rs1, rs2, source) => {
-                let s2 = get_source2_value(&state, *rs2, source);
-                let result = state.registers[*rs1 as usize] << s2;
-                set_flags(&mut state, result);
-                state.registers[*rd as usize] = result;
+                for mut core in &mut state.cores {
+                    let s2 = get_source2_value(&core, *rs2, source);
+                    let result = core.registers[*rs1 as usize] << s2;
+                    set_flags(&mut core, result);
+                    core.registers[*rd as usize] = result;
+                }
             }
             Instruction::ShiftRight(rd, rs1, rs2, source) => {
-                let s2 = get_source2_value(&state, *rs2, source);
-                let result = state.registers[*rs1 as usize] >> s2;
-                set_flags(&mut state, result);
-                state.registers[*rd as usize] = result;
+                for mut core in &mut state.cores {
+                    let s2 = get_source2_value(&core, *rs2, source);
+                    let result = core.registers[*rs1 as usize] >> s2;
+                    set_flags(&mut core, result);
+                    core.registers[*rd as usize] = result;
+                }
             }
             Instruction::Not(rd, rs1) => {
-                let result = !state.registers[*rs1 as usize];
-                set_flags(&mut state, result);
-                state.registers[*rd as usize] = result;
+                for mut core in &mut state.cores {
+                    let result = !core.registers[*rs1 as usize];
+                    set_flags(&mut core, result);
+                    core.registers[*rd as usize] = result;
+                }
             }
             Instruction::Mult(rs1, rs2, mult_set, mult_sign, mult_shift) => {
-                let a = state.registers[*rs1 as usize];
-                let b = state.registers[*rs2 as usize];
+                for mut core in &mut state.cores {
+                    let a = core.registers[*rs1 as usize];
+                    let b = core.registers[*rs2 as usize];
 
-                let result = match mult_sign {
-                    MultSign::UnsignedUnsigned => ((a as u32) * (b as u32)) as u32,
-                    MultSign::UnsignedSigned => ((a as i32) * (b as i16) as i32) as u32,
-                    MultSign::SignedUnsigned => ((a as i16) as i32 * (b as i32)) as u32,
-                    MultSign::SignedSigned => ((a as i16) as i32 * (b as i16) as i32) as u32
-                };
+                    let result = match mult_sign {
+                        MultSign::UnsignedUnsigned => ((a as u32) * (b as u32)) as u32,
+                        MultSign::UnsignedSigned => ((a as i32) * (b as i16) as i32) as u32,
+                        MultSign::SignedUnsigned => ((a as i16) as i32 * (b as i32)) as u32,
+                        MultSign::SignedSigned => ((a as i16) as i32 * (b as i16) as i32) as u32
+                    };
 
-                let shift = match mult_shift {
-                    MultShift::Up => result << 16,
-                    MultShift::Down => result >> 16,
-                    MultShift::No => result
-                };
+                    let shift = match mult_shift {
+                        MultShift::Up => result << 16,
+                        MultShift::Down => result >> 16,
+                        MultShift::No => result
+                    };
 
-                let final_result = match mult_set {
-                    MultSet::Set => shift,
-                    MultSet::Accum => shift + state.accumulator
-                };
+                    let final_result = match mult_set {
+                        MultSet::Set => shift,
+                        MultSet::Accum => shift + core.accumulator
+                    };
 
-                state.accumulator = final_result;
+                    core.accumulator = final_result;
+                }
             }
             Instruction::Jump(rs) => {
-                state.program_counter = state.registers[*rs as usize] as u32;
+                state.program_counter = state.cores[0].registers[*rs as usize] as u16;
             }
             Instruction::Branch(neg, zero, pos, imm) => {
                 let addr = match labels.get(imm) {
-                    Some(l) => *l as u32,
+                    Some(l) => *l as u16,
                     None => panic!("No label {} to load", imm)
                 };
-                let diff = (addr as i64) - (state.program_counter as i64);
+                let diff = (addr as i32) - (state.program_counter as i32);
                 if diff < -128 || diff > 127 {
                     panic!("Tried to branch to label too far away")
                 }
 
-                if (*neg && state.negative) || (*zero && state.zero) || (*pos && state.positive) {
+                if (*neg && state.cores[0].negative)
+                    || (*zero && state.cores[0].zero)
+                    || (*pos && state.cores[0].positive) {
                     state.program_counter = addr;
                 }
             }
             Instruction::Load(rd, rs, imm) => {
-                state.registers[*rs as usize] = state.memory[(*rd as u16 + *imm) as usize];
+                for mut core in &mut state.cores {
+                    core.registers[*rs as usize] = state.memory[(*rd as u16 + *imm) as usize];
+                }
             }
             Instruction::Store(rd, rs, imm) => {
-                state.memory[(*rd as u16 + *imm) as usize] = state.registers[*rs as usize];
+                for core in &state.cores {
+                    state.memory[(*rd as u16 + *imm) as usize] = core.registers[*rs as usize];
+                }
             }
-            Instruction::LoadI(imm) => state.accumulator = *imm as u32,
+            Instruction::LoadI(imm) => {
+                for mut core in &mut state.cores {
+                    core.accumulator = *imm as u32;
+                }
+            }
             Instruction::LoadAddr(label) => {
-                let addr = match labels.get(label) {
-                    Some(l) => *l as u32,
-                    None => panic!("No label {} to load", label)
-                };
+                for mut core in &mut state.cores {
+                    let addr = match labels.get(label) {
+                        Some(l) => *l as u32,
+                        None => panic!("No label {} to load", label)
+                    };
 
-                state.accumulator = addr;
+                    core.accumulator = addr;
+                }
             }
         }
 
@@ -662,24 +709,11 @@ fn simulate(instructions: &[Instruction], labels: &HashMap<String, usize>, regis
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
-        println!("gpu16_sim <assembly file> <register file>");
+        println!("gpu16_sim <assembly file>");
         return;
     }
 
     let asm_file = &args[1];
-
-    let registers: [u16; 8] = if args.len() > 2 {
-        let reg_file = &args[2];
-        let reg_f = File::open(reg_file).expect("File not found");
-        let reader = BufReader::new(reg_f);
-        reader.lines()
-            .map(|line| line.unwrap().parse::<u16>().unwrap())
-            .collect::<Vec<u16>>()
-            .try_into()
-            .unwrap()
-    } else {
-        [0; 8]
-    };
 
     let asm_string = match fs::read_to_string(asm_file) {
         Ok(text) => text,
@@ -695,5 +729,5 @@ fn main() {
         println!("Instruction is {:?}", instruction)
     }
 
-    simulate(instructions.as_slice(), &labels, &registers)
+    simulate(instructions.as_slice(), &labels)
 }
