@@ -565,6 +565,10 @@ fn set_flags(state: &mut CpuCore, result: u16) {
     state.negative = (result as i16) < 0;
 }
 
+fn calc_mem_offset(address: u16, offset: u16, thread: u16, stride: u16) -> u16 {
+    address + offset + (thread * stride)
+}
+
 fn simulate(instructions: &[Instruction], labels: &HashMap<String, usize>) {
     let mut state = CpuState {
         cores: [
@@ -708,15 +712,17 @@ fn simulate(instructions: &[Instruction], labels: &HashMap<String, usize>) {
             }
             Instruction::Load(rd, rs, imm) => {
                 for mut core in &mut state.cores {
+                    let addr = calc_mem_offset(core.registers[*rd as usize], *imm, core.thread_id as u16, state.stride);
                     if !core.exec_mask {
-                        core.registers[*rs as usize] = state.memory[(*rd as u16 + *imm) as usize];
+                        core.registers[*rs as usize] = state.memory[addr as usize];
                     }
                 }
             }
             Instruction::Store(rd, rs, imm) => {
                 for core in &state.cores {
                     if !core.exec_mask {
-                        state.memory[(*rd as u16 + *imm) as usize] = core.registers[*rs as usize];
+                        let addr = calc_mem_offset(core.registers[*rd as usize], *imm, core.thread_id as u16, state.stride);
+                        state.memory[addr as usize] = core.registers[*rs as usize];
                     }
                 }
             }
