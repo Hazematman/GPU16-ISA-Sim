@@ -142,6 +142,9 @@ pub enum Instruction {
     /* Mult op */
     Mult(u8, u8, MultSet, MultSign, MultShift),
 
+    /* Stride ops */
+    Stride(u16),
+
     /* Load store ops */
     Load(u8, u8, u16),
     Store(u8, u8, u16),
@@ -445,6 +448,10 @@ fn parse_instructions(tokens: &[Token]) -> Result<(Vec<Instruction>, HashMap<Str
                         let(rs1, rs2, set, sign, shift) = parse_mult(&mut it);
                         instructions.push(Instruction::Mult(rs1, rs2, set, sign, shift));
                     }
+                    "stride" => {
+                        let imm = parse_immediate(&mut it).expect("Failed to parse immediate value");
+                        instructions.push(Instruction::Stride(imm));
+                    }
                     "load" => {
                         let(rd, rs, imm) = parse_two_reg_imm(&mut it, "load");
                         instructions.push(Instruction::Load(rd, rs, imm));
@@ -517,6 +524,7 @@ struct CpuCore {
 struct CpuState {
     cores: [CpuCore; 4],
     program_counter: u16,
+    stride: u16,
     memory: [u16; 64*1024],
 }
 
@@ -525,7 +533,7 @@ impl fmt::Display for CpuState {
         for core in &self.cores {
             write!(f, "{:?}\n", core).unwrap();
         }
-        write!(f, "program counter {}", self.program_counter)
+        write!(f, "stride {}\nprogram counter {}", self.stride, self.program_counter)
     }
 }
 
@@ -566,6 +574,7 @@ fn simulate(instructions: &[Instruction], labels: &HashMap<String, usize>) {
             CpuCore {thread_id: 3, ..Default::default() }
         ],
         program_counter: 0,
+        stride: 0,
         memory: [0; 64*1024]
     };
 
@@ -693,6 +702,9 @@ fn simulate(instructions: &[Instruction], labels: &HashMap<String, usize>) {
                 if all_masked {
                     state.program_counter = addr;
                 }
+            }
+            Instruction::Stride(imm) => {
+                state.stride = *imm;
             }
             Instruction::Load(rd, rs, imm) => {
                 for mut core in &mut state.cores {
