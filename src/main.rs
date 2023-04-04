@@ -418,23 +418,23 @@ fn parse_instructions(tokens: &[Token]) -> Result<(Vec<Instruction>, HashMap<Str
                         instructions.push(Instruction::Add(r1, r2, r3, source));
                     }
                     "sub" => {
-                        let (r1, r2, r3, source) = parse_three_reg_all(&mut it, "add");
+                        let (r1, r2, r3, source) = parse_three_reg_all(&mut it, "sub");
                         instructions.push(Instruction::Sub(r1, r2, r3, source));
                     }
                     "and" => {
-                        let (r1, r2, r3, source) = parse_three_reg_all(&mut it, "add");
+                        let (r1, r2, r3, source) = parse_three_reg_all(&mut it, "and");
                         instructions.push(Instruction::And(r1, r2, r3, source));
                     }
                     "xor" => {
-                        let (r1, r2, r3, source) = parse_three_reg_all(&mut it, "add");
+                        let (r1, r2, r3, source) = parse_three_reg_all(&mut it, "xor");
                         instructions.push(Instruction::Xor(r1, r2, r3, source));
                     }
                     "shift_left" => {
-                        let (r1, r2, r3, source) = parse_three_reg_all(&mut it, "add");
+                        let (r1, r2, r3, source) = parse_three_reg_all(&mut it, "shift_left");
                         instructions.push(Instruction::ShiftLeft(r1, r2, r3, source));
                     }
                     "shift_right" => {
-                        let (r1, r2, r3, source) = parse_three_reg_all(&mut it, "add");
+                        let (r1, r2, r3, source) = parse_three_reg_all(&mut it, "shift_right");
                         instructions.push(Instruction::ShiftRight(r1, r2, r3, source));
                     }
                     "not" => {
@@ -509,6 +509,7 @@ struct CpuCore {
     negative: bool,
     zero: bool,
     positive: bool,
+    exec_mask: bool,
     accumulator: u32,
 }
 
@@ -536,6 +537,7 @@ impl Default for CpuCore {
             negative: false,
             zero: false,
             positive: false,
+            exec_mask: false,
             accumulator: 0u32
         }
     }
@@ -574,55 +576,69 @@ fn simulate(instructions: &[Instruction], labels: &HashMap<String, usize>) {
                 for mut core in &mut state.cores {
                     let s2 = get_source2_value(&core, *rs2, source);
                     let result = core.registers[*rs1 as usize] + s2;
-                    set_flags(&mut core, result);
-                    core.registers[*rd as usize] = result;
+                    if !core.exec_mask {
+                        set_flags(&mut core, result);
+                        core.registers[*rd as usize] = result;
+                    }
                 }
             }
             Instruction::Sub(rd, rs1, rs2, source) => {
                 for mut core in &mut state.cores {
                     let s2 = get_source2_value(&core, *rs2, source);
                     let result = core.registers[*rs1 as usize].wrapping_sub(s2);
-                    set_flags(&mut core, result);
-                    core.registers[*rd as usize] = result;
+                    if !core.exec_mask {
+                        set_flags(&mut core, result);
+                        core.registers[*rd as usize] = result;
+                    }
                 }
             }
             Instruction::And(rd, rs1, rs2, source) => {
                 for mut core in &mut state.cores {
                     let s2 = get_source2_value(&core, *rs2, source);
                     let result = core.registers[*rs1 as usize] & s2;
-                    set_flags(&mut core, result);
-                    core.registers[*rd as usize] = result;
+                    if !core.exec_mask {
+                        set_flags(&mut core, result);
+                        core.registers[*rd as usize] = result;
+                    }
                 }
             }
             Instruction::Xor(rd, rs1, rs2, source) => {
                 for mut core in &mut state.cores {
                     let s2 = get_source2_value(&core, *rs2, source);
                     let result = core.registers[*rs1 as usize] ^ s2;
-                    set_flags(&mut core, result);
-                    core.registers[*rd as usize] = result;
+                    if !core.exec_mask {
+                        set_flags(&mut core, result);
+                        core.registers[*rd as usize] = result;
+                    }
                 }
             }
             Instruction::ShiftLeft(rd, rs1, rs2, source) => {
                 for mut core in &mut state.cores {
                     let s2 = get_source2_value(&core, *rs2, source);
                     let result = core.registers[*rs1 as usize] << s2;
-                    set_flags(&mut core, result);
-                    core.registers[*rd as usize] = result;
+                    if !core.exec_mask {
+                        set_flags(&mut core, result);
+                        core.registers[*rd as usize] = result;
+                    }
                 }
             }
             Instruction::ShiftRight(rd, rs1, rs2, source) => {
                 for mut core in &mut state.cores {
                     let s2 = get_source2_value(&core, *rs2, source);
                     let result = core.registers[*rs1 as usize] >> s2;
-                    set_flags(&mut core, result);
-                    core.registers[*rd as usize] = result;
+                    if !core.exec_mask {
+                        set_flags(&mut core, result);
+                        core.registers[*rd as usize] = result;
+                    }
                 }
             }
             Instruction::Not(rd, rs1) => {
                 for mut core in &mut state.cores {
                     let result = !core.registers[*rs1 as usize];
-                    set_flags(&mut core, result);
-                    core.registers[*rd as usize] = result;
+                    if !core.exec_mask {
+                        set_flags(&mut core, result);
+                        core.registers[*rd as usize] = result;
+                    }
                 }
             }
             Instruction::Mult(rs1, rs2, mult_set, mult_sign, mult_shift) => {
@@ -648,7 +664,9 @@ fn simulate(instructions: &[Instruction], labels: &HashMap<String, usize>) {
                         MultSet::Accum => shift + core.accumulator
                     };
 
-                    core.accumulator = final_result;
+                    if !core.exec_mask {
+                        core.accumulator = final_result;
+                    }
                 }
             }
             Instruction::Jump(rs) => {
@@ -664,25 +682,37 @@ fn simulate(instructions: &[Instruction], labels: &HashMap<String, usize>) {
                     panic!("Tried to branch to label too far away")
                 }
 
-                if (*neg && state.cores[0].negative)
-                    || (*zero && state.cores[0].zero)
-                    || (*pos && state.cores[0].positive) {
+                for i in 0..4 {
+                    state.cores[i].exec_mask = !((*neg && state.cores[i].negative)
+                                               || (*zero && state.cores[i].zero)
+                                               || (*pos && state.cores[i].positive));
+                }
+
+                let all_masked = state.cores.iter().fold(true, |acc, x| acc && x.exec_mask);
+
+                if all_masked {
                     state.program_counter = addr;
                 }
             }
             Instruction::Load(rd, rs, imm) => {
                 for mut core in &mut state.cores {
-                    core.registers[*rs as usize] = state.memory[(*rd as u16 + *imm) as usize];
+                    if !core.exec_mask {
+                        core.registers[*rs as usize] = state.memory[(*rd as u16 + *imm) as usize];
+                    }
                 }
             }
             Instruction::Store(rd, rs, imm) => {
                 for core in &state.cores {
-                    state.memory[(*rd as u16 + *imm) as usize] = core.registers[*rs as usize];
+                    if !core.exec_mask {
+                        state.memory[(*rd as u16 + *imm) as usize] = core.registers[*rs as usize];
+                    }
                 }
             }
             Instruction::LoadI(imm) => {
                 for mut core in &mut state.cores {
-                    core.accumulator = *imm as u32;
+                    if !core.exec_mask {
+                        core.accumulator = *imm as u32;
+                    }
                 }
             }
             Instruction::LoadAddr(label) => {
@@ -692,7 +722,9 @@ fn simulate(instructions: &[Instruction], labels: &HashMap<String, usize>) {
                         None => panic!("No label {} to load", label)
                     };
 
-                    core.accumulator = addr;
+                    if !core.exec_mask {
+                        core.accumulator = addr;
+                    }
                 }
             }
         }
