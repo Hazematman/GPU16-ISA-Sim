@@ -24,6 +24,6 @@ fn main() {
         println!("Instruction is {:?}", instruction)
     }
 
-    let state = gpu::simulate(instructions.as_slice(), &labels);
+    let state = gpu::simulate_default(instructions.as_slice(), &labels);
     println!("CpuState is:\n{}", state);
 }

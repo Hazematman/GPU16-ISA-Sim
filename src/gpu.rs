@@ -511,21 +511,21 @@ pub fn parse(input: &String) -> Result<(Vec<Instruction>, HashMap<String, usize>
 
 #[derive(Debug)]
 pub struct CpuCore {
-    thread_id: u8,
-    registers: [u16; 8],
-    negative: bool,
-    zero: bool,
-    positive: bool,
-    exec_mask: bool,
-    accumulator: u32,
+    pub thread_id: u8,
+    pub registers: [u16; 8],
+    pub negative: bool,
+    pub zero: bool,
+    pub positive: bool,
+    pub exec_mask: bool,
+    pub accumulator: u32,
 }
 
 #[derive(Debug)]
 pub struct CpuState {
-    cores: [CpuCore; 4],
-    program_counter: u16,
-    stride: u16,
-    memory: [u16; 64*1024],
+    pub cores: [CpuCore; 4],
+    pub program_counter: u16,
+    pub stride: u16,
+    pub memory: [u16; 64*1024],
 }
 
 impl fmt::Display for CpuState {
@@ -569,8 +569,8 @@ fn calc_mem_offset(address: u16, offset: u16, thread: u16, stride: u16) -> u16 {
     address + offset + (thread * stride)
 }
 
-pub fn simulate(instructions: &[Instruction], labels: &HashMap<String, usize>) -> CpuState {
-    let mut state = CpuState {
+pub fn simulate_default(instructions: &[Instruction], labels: &HashMap<String, usize>) -> CpuState {
+    let state = CpuState {
         cores: [
             CpuCore {thread_id: 0, ..Default::default() },
             CpuCore {thread_id: 1, ..Default::default() },
@@ -581,6 +581,12 @@ pub fn simulate(instructions: &[Instruction], labels: &HashMap<String, usize>) -
         stride: 0,
         memory: [0; 64*1024]
     };
+
+    simulate(state, instructions, labels)
+}
+
+pub fn simulate(in_state: CpuState, instructions: &[Instruction], labels: &HashMap<String, usize>) -> CpuState {
+    let mut state = in_state;
 
     let mut running = true;
     while running {

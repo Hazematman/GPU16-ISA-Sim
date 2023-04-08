@@ -5,7 +5,16 @@ mod tests {
     use std::*;
     use crate::gpu;
 
+    fn high_low(a: f32) -> (u16, u16) {
+        let high = a as u16;
+        let low = ((a * 65536.0) % 65536.0) as u16;
+        (high, low)
+    }
+
     #[test]
+    /* This test checks if matrix multiplication works.
+     * it will only look at results from the first CPU core
+     */
     fn matrix_multiply() {
         let asm_string = match fs::read_to_string("tests/matrix.S") {
             Ok(text) => text,
@@ -17,7 +26,48 @@ mod tests {
 
         let (instructions, labels) = gpu::parse(&asm_string).unwrap();
 
-        let state = gpu::simulate(instructions.as_slice(), &labels);
+        let mut memory = [0u16; 64*1024];
+
+        let x = 1.0f32;
+        let mat = [1.0f32, 0.0f32, 0.0f32, 0.0f32,
+                   0.0f32, 1.0f32, 0.0f32, 0.0f32,
+                   0.0f32, 0.0f32, 1.0f32, 0.0f32];
+
+        let (x_high, x_low) = high_low(x);
+        memory[0] = x_high;
+        memory[1] = x_low;
+        for i in 0..12 {
+            let (high, low) = high_low(mat[i]);
+            memory[(i+6)*2] = high;
+            memory[(i+6)*2 + 1] = low;
+        }
+
+        assert_eq!(x_high, 1, "Validate x high is correct");
+        assert_eq!(x_low, 0, "Validate x low is correct");
+
+        let x_prime = mat[0] * x + mat[1] * x + mat[2] * x + mat[3];
+
+        let in_state = gpu::CpuState {
+            cores: [
+                gpu::CpuCore {
+                    thread_id: 0,
+                    registers: [0u16, 6u16, 0u16, 0u16, 0u16, 0u16, 0u16, 0u16],
+                    ..Default::default()
+                },
+                gpu::CpuCore {thread_id: 1, exec_mask: true, ..Default::default() },
+                gpu::CpuCore {thread_id: 2, exec_mask: true, ..Default::default() },
+                gpu::CpuCore {thread_id: 3, exec_mask: true, ..Default::default() }
+            ],
+            program_counter: 0,
+            stride: 0,
+            memory: [0; 64*1024]
+        };
+
+        let state = gpu::simulate(in_state, instructions.as_slice(), &labels);
         println!("CpuState is:\n{}", state);
+
+        let (x_prime_high, x_prime_low) = high_low(x_prime);
+        assert_eq!(x_prime_high, state.memory[0]);
+        assert_eq!(x_prime_low, state.memory[1]);
     }
 }
