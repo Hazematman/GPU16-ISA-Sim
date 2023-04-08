@@ -718,17 +718,19 @@ pub fn simulate(in_state: CpuState, instructions: &[Instruction], labels: &HashM
             }
             Instruction::Load(rd, rs, imm) => {
                 for mut core in &mut state.cores {
-                    let addr = calc_mem_offset(core.registers[*rd as usize], *imm, core.thread_id as u16, state.stride);
+                    let addr = calc_mem_offset(core.registers[*rs as usize], *imm, core.thread_id as u16, state.stride);
                     if !core.exec_mask {
-                        core.registers[*rs as usize] = state.memory[addr as usize];
+                        println!("Loading at addr: {}={}", addr, state.memory[addr as usize]);
+                        core.registers[*rd as usize] = state.memory[addr as usize];
                     }
                 }
             }
             Instruction::Store(rd, rs, imm) => {
                 for core in &state.cores {
                     if !core.exec_mask {
-                        let addr = calc_mem_offset(core.registers[*rd as usize], *imm, core.thread_id as u16, state.stride);
-                        state.memory[addr as usize] = core.registers[*rs as usize];
+                        let addr = calc_mem_offset(core.registers[*rs as usize], *imm, core.thread_id as u16, state.stride);
+                        println!("Storing at addr: {}={}", addr, state.memory[addr as usize]);
+                        state.memory[addr as usize] = core.registers[*rd as usize];
                     }
                 }
             }

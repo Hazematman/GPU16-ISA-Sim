@@ -33,13 +33,15 @@ mod tests {
                    0.0f32, 1.0f32, 0.0f32, 0.0f32,
                    0.0f32, 0.0f32, 1.0f32, 0.0f32];
 
+        let start_addr = 64;
         let (x_high, x_low) = high_low(x);
-        memory[0] = x_high;
-        memory[1] = x_low;
+        memory[start_addr] = x_high;
+        memory[start_addr + 1] = x_low;
+        println!("MEMORY IS {}", memory[start_addr]);
         for i in 0..12 {
             let (high, low) = high_low(mat[i]);
-            memory[(i+6)*2] = high;
-            memory[(i+6)*2 + 1] = low;
+            memory[(i)*2 + start_addr + 6] = high;
+            memory[(i+start_addr+6)*2 + 1 + start_addr + 6] = low;
         }
 
         assert_eq!(x_high, 1, "Validate x high is correct");
@@ -51,7 +53,7 @@ mod tests {
             cores: [
                 gpu::CpuCore {
                     thread_id: 0,
-                    registers: [0u16, 6u16, 0u16, 0u16, 0u16, 0u16, 0u16, 0u16],
+                    registers: [0u16, start_addr as u16, (start_addr+6) as u16, 0u16, 0u16, 0u16, 0u16, 0u16],
                     ..Default::default()
                 },
                 gpu::CpuCore {thread_id: 1, exec_mask: true, ..Default::default() },
@@ -60,14 +62,16 @@ mod tests {
             ],
             program_counter: 0,
             stride: 0,
-            memory: [0; 64*1024]
+            memory: memory,
         };
 
         let state = gpu::simulate(in_state, instructions.as_slice(), &labels);
         println!("CpuState is:\n{}", state);
 
         let (x_prime_high, x_prime_low) = high_low(x_prime);
-        assert_eq!(x_prime_high, state.memory[0]);
-        assert_eq!(x_prime_low, state.memory[1]);
+        assert_eq!(x_prime_high, state.memory[start_addr]);
+        assert_eq!(x_prime_low, state.memory[start_addr+1]);
+
+        // Todo test the rest of the components
     }
 }

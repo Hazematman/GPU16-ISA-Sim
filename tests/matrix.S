@@ -63,7 +63,7 @@ vertex_func:
     ; Store ax + bx
     stride 6
     store r5, r1, 0
-    store r6, r1, 0
+    store r6, r1, 1
 
     stride 0
     load r5, r2, 4
@@ -87,12 +87,12 @@ vertex_func:
     load r4, r2, 7
 
     ; Calculate ax + bx + cx + d
-    add.accum.low r6, r4
-    add.accum.high r5, r3
+    add r6, r6, r4
+    add r5, r5, r3
 
     ; Store new x value over old x value
     stride 6
     store r5, r1, 0
     store r6, r1, 1
 
-
+done:
